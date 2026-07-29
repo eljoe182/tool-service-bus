@@ -1,4 +1,4 @@
-# Azure Service Bus JSON Sender
+# Azure Service Bus JSON Sender And Reader
 
 Send each object in an enveloped JSON file as an independent message to an Azure Service Bus queue. The queue name is the file name without its final `.json` suffix, and the envelope's common properties become Azure application properties on every message.
 
