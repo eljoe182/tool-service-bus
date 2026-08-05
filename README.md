@@ -1,6 +1,6 @@
 # Azure Service Bus JSON Sender And Reader
 
-Send each object in an enveloped JSON file as an independent message to an Azure Service Bus queue. The queue name is the file name without its final `.json` suffix, and the envelope's common properties become Azure application properties on every message.
+Send each object in an enveloped JSON file as an independent message to an Azure Service Bus queue by default, or publish every valid file to one selected topic. In queue mode, the queue name is the file name without its final `.json` suffix. In topic mode, that file stem is an expected subscription label in safe logs only; it is not an Azure destination or application property. The envelope's common properties become Azure application properties on every message in either mode.
 
 ## Requirements
 
@@ -54,21 +54,36 @@ Each file must be UTF-8 JSON whose root is an object containing both `properties
 }
 ```
 
-`data/orders.json` targets the `orders` queue. Each `data` object is compactly serialized as one message body; the envelope itself is never sent as a message. Every message receives its own copy of the `properties` mapping as Azure application properties.
+`data/orders.json` targets the `orders` queue when no topic is selected. Each `data` object is compactly serialized as one message body; the envelope itself is never sent as a message. Every message receives its own copy of the `properties` mapping as Azure application properties.
 
 ## Run
+
+Send each file to its stem-derived queue, unchanged:
 
 ```bash
 conda run -n tools-service-bus poetry run service-bus-send
 ```
 
-The tool creates one Service Bus client for the run and one queue sender context per valid file. It logs per-file progress and finishes with a summary such as:
+Publish every valid file to one topic:
+
+```bash
+conda run -n tools-service-bus poetry run service-bus-send \
+  --topic orders-events
+```
+
+| Argument | Contract |
+| --- | --- |
+| `--topic` | Optional, non-empty topic name. When omitted, each valid file uses `get_queue_sender(queue_name=file_stem)`. When present, each valid file uses `get_topic_sender(topic_name=topic)`. |
+
+In topic mode, `data/dashboard.json` publishes to `orders-events`; `dashboard` appears only as the expected subscription in safe logs. Azure Service Bus publishes to topics, and subscription filters determine delivery. The tool creates one Service Bus client for the run and one sender context per valid file only after the complete envelope validates.
+
+It logs per-file progress and finishes with a summary such as:
 
 ```text
 Service Bus send summary: files=3 succeeded=2 failed=1 messages_sent=47
 ```
 
-Logs include file names, queue names, exception class names, batch numbers, and confirmed counts. They do not include the connection string, complete payloads, `.env` contents, or raw exception text.
+Logs include file names, queue names or topic/expected-subscription labels, exception class names, batch numbers, and confirmed counts. They do not include the connection string, complete payloads, `.env` contents, raw exception text, or application-property values.
 
 ## Queue Reader
 

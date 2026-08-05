@@ -35,6 +35,10 @@ class QueueReceiver(Protocol):
 class ServiceBusClientLike(Protocol):
     def get_queue_sender(self, queue_name: str) -> AbstractContextManager[QueueSender]: ...
 
+    def get_topic_sender(
+        self, *, topic_name: str
+    ) -> AbstractContextManager[QueueSender]: ...
+
     def get_queue_receiver(
         self, *, queue_name: str
     ) -> AbstractContextManager[QueueReceiver]: ...

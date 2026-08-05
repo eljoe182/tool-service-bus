@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from collections.abc import Callable, Sequence
@@ -21,6 +22,29 @@ _LOGGER = logging.getLogger("sender")
 
 
 ConfigLoader = Callable[[], SenderConfig]
+
+
+class ArgumentParseError(ValueError):
+    pass
+
+
+class SenderArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ArgumentParseError(message)
+
+
+def _non_empty_topic(value: str) -> str:
+    topic_name = value.strip()
+    if not topic_name:
+        raise argparse.ArgumentTypeError("--topic must be non-empty")
+    return topic_name
+
+
+def parse_topic(argv: Sequence[str]) -> str | None:
+    parser = SenderArgumentParser(prog="service-bus-send", add_help=False)
+    parser.add_argument("--topic", type=_non_empty_topic)
+    namespace = parser.parse_args(argv)
+    return namespace.topic
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +72,7 @@ def format_summary(summary: RunSummary) -> str:
 def run(
     config: SenderConfig,
     *,
+    topic: str | None = None,
     client_factory: ClientFactory = default_client_factory,
     logger: logging.Logger = _LOGGER,
 ) -> RunSummary:
@@ -59,12 +84,21 @@ def run(
     with client_factory(config.connection_string) as client:
         for path in paths:
             queue_name = derive_queue_name(path)
+            destination = (
+                queue_name
+                if topic is None
+                else f"topic {topic} expected_subscription {queue_name}"
+            )
             sent_for_file = 0
             try:
                 envelope = load_message_envelope(path)
                 primary_send_error: FileSendError | None = None
                 try:
-                    with client.get_queue_sender(queue_name=queue_name) as sender:
+                    if topic is None:
+                        sender_context = client.get_queue_sender(queue_name=queue_name)
+                    else:
+                        sender_context = client.get_topic_sender(topic_name=topic)
+                    with sender_context as sender:
                         try:
                             sent_for_file = send_objects(
                                 sender, envelope.data, envelope.properties
@@ -83,7 +117,7 @@ def run(
                 logger.error(
                     "%s -> %s: %s while validating input; messages_sent=%d",
                     path.name,
-                    queue_name,
+                    destination,
                     type(error).__name__,
                     0,
                 )
@@ -94,7 +128,7 @@ def run(
                 logger.error(
                     "%s -> %s: %s while %s batch %d; messages_sent=%d",
                     path.name,
-                    queue_name,
+                    destination,
                     error.error_type,
                     error.operation,
                     error.batch_number,
@@ -105,10 +139,10 @@ def run(
                 failed += 1
                 messages_sent += sent_for_file
                 logger.error(
-                    "%s -> %s: %s while opening or closing queue sender; "
+                    "%s -> %s: %s while opening or closing sender; "
                     "messages_sent=%d",
                     path.name,
-                    queue_name,
+                    destination,
                     type(error).__name__,
                     sent_for_file,
                 )
@@ -119,7 +153,7 @@ def run(
             logger.info(
                 "%s -> %s: sent %d messages",
                 path.name,
-                queue_name,
+                destination,
                 sent_for_file,
             )
 
@@ -144,9 +178,15 @@ def main(
 ) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if arguments == ["--help"]:
-        stdout.write("usage: service-bus-send\n")
+        stdout.write("usage: service-bus-send [--topic TOPIC]\n")
         return 0
     empty_summary = RunSummary(files=0, succeeded=0, failed=0, messages_sent=0)
+    try:
+        topic = parse_topic(arguments)
+    except ArgumentParseError as error:
+        _LOGGER.error("%s while parsing arguments", type(error).__name__)
+        _LOGGER.error(format_summary(empty_summary))
+        return 2
     try:
         config = config_loader()
     except Exception as error:
@@ -159,7 +199,9 @@ def main(
 
     _configure_logging(config.log_level)
     try:
-        summary = run(config, client_factory=client_factory, logger=_LOGGER)
+        summary = run(
+            config, topic=topic, client_factory=client_factory, logger=_LOGGER
+        )
     except Exception as error:
         _LOGGER.error(
             "%s while starting or running sender",
