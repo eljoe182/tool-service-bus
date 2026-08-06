@@ -68,10 +68,10 @@ Envelope validation, application properties, compact serialization, queue-defaul
 
 ## Verification Checklist
 
-- [ ] Omitted `--delay` and `--delay 0` keep dynamic batching and send zero sleeps.
-- [ ] `--delay` accepts non-negative floats (including decimals) and rejects invalid values with exit code `2` before configuration loading.
-- [ ] Positive delay sends one message per Azure call and sleeps `N-1` times for `N` messages in a file.
-- [ ] `--delay` combines with `--topic` without changing destination selection.
-- [ ] Partial-send errors in delay mode still report confirmed counts and continue later files.
-- [ ] README documents `--delay` with an example and argument table row.
-- [ ] Offline tests cover parsing, delay-mode sends with injectable sleep, and existing batching regressions.
+- [x] Omitted `--delay` and `--delay 0` keep dynamic batching and send zero sleeps.
+- [x] `--delay` accepts non-negative floats (including decimals) and rejects invalid values with exit code `2` before configuration loading.
+- [x] Positive delay sends one message per Azure call and sleeps `N-1` times for `N` messages in a file.
+- [x] `--delay` combines with `--topic` without changing destination selection.
+- [x] Partial-send errors in delay mode still report confirmed counts and continue later files.
+- [x] README documents `--delay` with an example and argument table row.
+- [x] Offline tests cover parsing, delay-mode sends with injectable sleep, and existing batching regressions.

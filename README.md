@@ -71,9 +71,17 @@ conda run -n tools-service-bus poetry run service-bus-send \
   --topic orders-events
 ```
 
+Send one message at a time with a half-second pause between messages:
+
+```bash
+conda run -n tools-service-bus poetry run service-bus-send \
+  --delay 0.5
+```
+
 | Argument | Contract |
 | --- | --- |
 | `--topic` | Optional, non-empty topic name. When omitted, each valid file uses `get_queue_sender(queue_name=file_stem)`. When present, each valid file uses `get_topic_sender(topic_name=topic)`. |
+| `--delay` | Optional non-negative seconds. Omitted or `0` keeps dynamic batching with no sleep. Values greater than `0` send one message at a time and sleep `N-1` times for `N` messages in a file. |
 
 In topic mode, `data/dashboard.json` publishes to `orders-events`; `dashboard` appears only as the expected subscription in safe logs. Azure Service Bus publishes to topics, and subscription filters determine delivery. The tool creates one Service Bus client for the run and one sender context per valid file only after the complete envelope validates.
 

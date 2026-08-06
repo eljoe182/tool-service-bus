@@ -210,3 +210,62 @@ def test_send_objects_reports_only_batches_confirmed_before_send_failure() -> No
     assert sender.sent_batches == [['{"n":1}', '{"n":2}']]
     assert "secret-marker" not in str(error.value)
     assert "complete-object" not in str(error.value)
+
+
+def test_send_objects_with_delay_sends_one_message_at_a_time_and_sleeps_between() -> None:
+    sender = FakeSender()
+    sleeps: list[float] = []
+
+    sent_count = send_objects(
+        sender,
+        [{"n": 1}, {"n": 2}, {"n": 3}],
+        {},
+        message_factory=lambda body, properties: body,
+        delay_seconds=0.5,
+        sleeper=sleeps.append,
+    )
+
+    assert sent_count == 3
+    assert sender.sent_batches == [['{"n":1}'], ['{"n":2}'], ['{"n":3}']]
+    assert sleeps == [0.5, 0.5]
+
+
+def test_send_objects_with_delay_zero_keeps_batching_and_does_not_sleep() -> None:
+    sender = FakeSender(capacity=2)
+    sleeps: list[float] = []
+
+    sent_count = send_objects(
+        sender,
+        [{"n": 1}, {"n": 2}, {"n": 3}],
+        {},
+        message_factory=lambda body, properties: body,
+        delay_seconds=0.0,
+        sleeper=sleeps.append,
+    )
+
+    assert sent_count == 3
+    assert sender.sent_batches == [['{"n":1}', '{"n":2}'], ['{"n":3}']]
+    assert sleeps == []
+
+
+def test_send_objects_with_delay_reports_confirmed_count_before_send_failure() -> None:
+    sender = FakeSender(fail_on_send=2, failure_text="secret-marker")
+    sleeps: list[float] = []
+
+    with pytest.raises(FileSendError) as error:
+        send_objects(
+            sender,
+            [{"n": 1}, {"n": 2}, {"n": 3}],
+            {},
+            message_factory=lambda body, properties: body,
+            delay_seconds=1.0,
+            sleeper=sleeps.append,
+        )
+
+    assert error.value.sent_count == 1
+    assert error.value.batch_number == 2
+    assert error.value.operation == "sending"
+    assert error.value.error_type == "RuntimeError"
+    assert sender.sent_batches == [['{"n":1}']]
+    assert sleeps == [1.0]
+    assert "secret-marker" not in str(error.value)

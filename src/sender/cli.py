@@ -40,11 +40,30 @@ def _non_empty_topic(value: str) -> str:
     return topic_name
 
 
-def parse_topic(argv: Sequence[str]) -> str | None:
+def _non_negative_delay(value: str) -> float:
+    try:
+        delay = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "--delay must be a non-negative number"
+        ) from error
+    if delay < 0:
+        raise argparse.ArgumentTypeError("--delay must be a non-negative number")
+    return delay
+
+
+@dataclass(frozen=True, slots=True)
+class SendArguments:
+    topic: str | None = None
+    delay_seconds: float = 0.0
+
+
+def parse_send_arguments(argv: Sequence[str]) -> SendArguments:
     parser = SenderArgumentParser(prog="service-bus-send", add_help=False)
     parser.add_argument("--topic", type=_non_empty_topic)
+    parser.add_argument("--delay", type=_non_negative_delay, default=0.0)
     namespace = parser.parse_args(argv)
-    return namespace.topic
+    return SendArguments(topic=namespace.topic, delay_seconds=namespace.delay)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +92,7 @@ def run(
     config: SenderConfig,
     *,
     topic: str | None = None,
+    delay_seconds: float = 0.0,
     client_factory: ClientFactory = default_client_factory,
     logger: logging.Logger = _LOGGER,
 ) -> RunSummary:
@@ -101,7 +121,10 @@ def run(
                     with sender_context as sender:
                         try:
                             sent_for_file = send_objects(
-                                sender, envelope.data, envelope.properties
+                                sender,
+                                envelope.data,
+                                envelope.properties,
+                                delay_seconds=delay_seconds,
                             )
                         except FileSendError as error:
                             primary_send_error = error
@@ -178,11 +201,11 @@ def main(
 ) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if arguments == ["--help"]:
-        stdout.write("usage: service-bus-send [--topic TOPIC]\n")
+        stdout.write("usage: service-bus-send [--topic TOPIC] [--delay SECONDS]\n")
         return 0
     empty_summary = RunSummary(files=0, succeeded=0, failed=0, messages_sent=0)
     try:
-        topic = parse_topic(arguments)
+        send_arguments = parse_send_arguments(arguments)
     except ArgumentParseError as error:
         _LOGGER.error("%s while parsing arguments", type(error).__name__)
         _LOGGER.error(format_summary(empty_summary))
@@ -200,7 +223,11 @@ def main(
     _configure_logging(config.log_level)
     try:
         summary = run(
-            config, topic=topic, client_factory=client_factory, logger=_LOGGER
+            config,
+            topic=send_arguments.topic,
+            delay_seconds=send_arguments.delay_seconds,
+            client_factory=client_factory,
+            logger=_LOGGER,
         )
     except Exception as error:
         _LOGGER.error(

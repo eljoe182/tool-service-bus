@@ -6,7 +6,15 @@ from pathlib import Path
 import pytest
 from azure.servicebus.exceptions import MessageSizeExceededError
 
-from sender.cli import ArgumentParseError, RunSummary, format_summary, main, parse_topic, run
+from sender.cli import (
+    ArgumentParseError,
+    RunSummary,
+    SendArguments,
+    format_summary,
+    main,
+    parse_send_arguments,
+    run,
+)
 from shared.config import ConfigError, SenderConfig
 
 
@@ -564,9 +572,20 @@ def test_main_returns_two_with_zero_summary_when_client_creation_fails(
     assert "complete-payload-must-not-appear" not in caplog.text
 
 
-def test_parse_topic_keeps_queue_default_and_strips_a_valid_topic() -> None:
-    assert parse_topic([]) is None
-    assert parse_topic(["--topic", " orders-events "]) == "orders-events"
+def test_parse_send_arguments_defaults_and_accepts_delay() -> None:
+    assert parse_send_arguments([]) == SendArguments(topic=None, delay_seconds=0.0)
+    assert parse_send_arguments(["--topic", " orders-events "]) == SendArguments(
+        topic="orders-events", delay_seconds=0.0
+    )
+    assert parse_send_arguments(["--delay", "0"]) == SendArguments(
+        topic=None, delay_seconds=0.0
+    )
+    assert parse_send_arguments(["--delay", "0.5"]) == SendArguments(
+        topic=None, delay_seconds=0.5
+    )
+    assert parse_send_arguments(["--topic", " orders-events ", "--delay", "1"]) == (
+        SendArguments(topic="orders-events", delay_seconds=1.0)
+    )
 
 
 @pytest.mark.parametrize(
@@ -574,21 +593,29 @@ def test_parse_topic_keeps_queue_default_and_strips_a_valid_topic() -> None:
     [
         (["--topic", "   "], "--topic must be non-empty"),
         (["--topic"], "expected one argument"),
+        (["--delay", "-1"], "--delay must be a non-negative number"),
+        (["--delay"], "expected one argument"),
+        (["--delay", "abc"], "--delay must be a non-negative number"),
         (["--unknown"], "unrecognized arguments: --unknown"),
         (["--topic", "orders-events", "unexpected"], "unrecognized arguments: unexpected"),
     ],
 )
-def test_parse_topic_rejects_invalid_arguments(
+def test_parse_send_arguments_rejects_invalid_arguments(
     argv: list[str], expected_message: str
 ) -> None:
     with pytest.raises(ArgumentParseError, match=expected_message):
-        parse_topic(argv)
+        parse_send_arguments(argv)
 
 
-@pytest.mark.parametrize("argv", [["--topic", "   "], ["--topic"]])
-def test_main_rejects_invalid_topic_before_loading_configuration(argv: list[str], caplog) -> None:
+@pytest.mark.parametrize(
+    "argv",
+    [["--topic", "   "], ["--topic"], ["--delay", "-1"], ["--delay", "abc"]],
+)
+def test_main_rejects_invalid_arguments_before_loading_configuration(
+    argv: list[str], caplog
+) -> None:
     def config_loader() -> SenderConfig:
-        raise AssertionError("configuration must not load for invalid topic")
+        raise AssertionError("configuration must not load for invalid arguments")
 
     with caplog.at_level(logging.ERROR):
         exit_code = main(
@@ -613,7 +640,7 @@ def test_main_prints_help_without_loading_configuration() -> None:
 
     assert main(["--help"], config_loader=config_loader, stdout=stdout) == 0
     assert config_calls == 0
-    assert "usage: service-bus-send" in stdout.getvalue()
+    assert stdout.getvalue() == "usage: service-bus-send [--topic TOPIC] [--delay SECONDS]\n"
 
 
 def test_readme_documents_queue_default_topic_sending_and_conda_commands() -> None:
@@ -621,8 +648,10 @@ def test_readme_documents_queue_default_topic_sending_and_conda_commands() -> No
 
     assert "conda run -n tools-service-bus poetry run service-bus-send" in readme
     assert "--topic orders-events" in readme
+    assert "--delay 0.5" in readme
     assert "get_queue_sender(queue_name=file_stem)" in readme
     assert "get_topic_sender(topic_name=topic)" in readme
     assert "expected subscription" in readme
     assert "not an Azure destination or application property" in readme
     assert "non-empty" in readme
+    assert "non-negative" in readme
