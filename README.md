@@ -160,3 +160,149 @@ conda run -n tools-service-bus poetry run pytest -v
 ```
 
 Tests use temporary directories and fakes for Azure clients, senders, batches, and SDK failures. They require no Azure credentials and make no network calls.
+
+## Local Messaging Emulators (optional)
+
+`docker-compose.yml` is an optional local stack for Azure Service Bus and Event Hubs emulators. Use it when you want to develop or test without a cloud namespace; the CLI works against either the emulator or a real Azure namespace.
+
+### Quick start
+
+1. Copy emulator variables from `.env.example` into your local `.env` (at least `ACCEPT_EULA=Y` and a strong `MSSQL_SA_PASSWORD`).
+2. Start the stack:
+
+```bash
+docker compose up -d
+```
+
+3. Point the tools at the Service Bus emulator with the development connection string (also listed in `.env.example`):
+
+```dotenv
+AZURE_SERVICE_BUS_CONNECTION_STRING=Endpoint=sb://localhost:5672;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+```
+
+4. Stop the stack when finished:
+
+```bash
+docker compose down
+```
+
+Topology is defined only in JSON config files mounted into the containers. Changing those files requires a restart of the affected emulator (`docker compose restart servicebus-emulator` or `eventhubs-emulator`).
+
+### Services And Ports
+
+| Service | Role | Host ports (defaults) |
+| --- | --- | --- |
+| `servicebus-emulator` | Azure Service Bus emulator | AMQP `5672`, HTTP `5300` |
+| `eventhubs-emulator` | Azure Event Hubs emulator | AMQP `5673`, Kafka `9092`, HTTP `5301` |
+| `sql-edge` | Persistence backend for Service Bus | internal only |
+| `azurite` | Blob/queue/table storage for Event Hubs | `10000` / `10001` / `10002` |
+
+Override host ports with the variables in `.env.example` (`SERVICEBUS_*`, `EVENTHUBS_*`, `AZURITE_*`). Event Hubs maps container AMQP `5672` to host `5673` so both emulators can run side by side.
+
+Default connection strings:
+
+| Emulator | Connection string |
+| --- | --- |
+| Service Bus | `Endpoint=sb://localhost:5672;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;` |
+| Event Hubs | `Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;` |
+
+### Configure Service Bus
+
+Edit `emulators/servicebus/config.json`. Queues and topics live under the namespace `sbemulatorns`.
+
+Current sample entities:
+
+- Queue: `queue.1`
+- Topic: `topic.1` with subscription `default`
+
+Then restart:
+
+```bash
+docker compose restart servicebus-emulator
+```
+
+### Configure Event Hubs
+
+Edit `emulators/eventhubs/config.json`. Event hubs live under the namespace `emulatorNs1`.
+
+Current sample entity:
+
+- Event hub: `eh1` (2 partitions) with consumer group `cg1`
+
+Then restart:
+
+```bash
+docker compose restart eventhubs-emulator
+```
+
+### Create A New Queue
+
+Add an object to the `Queues` array in `emulators/servicebus/config.json`:
+
+```json
+{
+  "Name": "orders",
+  "Properties": {
+    "DeadLetteringOnMessageExpiration": false,
+    "DefaultMessageTimeToLive": "PT1H",
+    "DuplicateDetectionHistoryTimeWindow": "PT20S",
+    "ForwardDeadLetteredMessagesTo": "",
+    "ForwardTo": "",
+    "LockDuration": "PT1M",
+    "MaxDeliveryCount": 3,
+    "RequiresDuplicateDetection": false,
+    "RequiresSession": false
+  }
+}
+```
+
+Restart `servicebus-emulator`. With `data/orders.json`, `service-bus-send` targets the `orders` queue when no `--topic` is set.
+
+### Create A New Topic
+
+Add an object to the `Topics` array in `emulators/servicebus/config.json`. Include at least one subscription:
+
+```json
+{
+  "Name": "orders-events",
+  "Properties": {
+    "DefaultMessageTimeToLive": "PT1H",
+    "DuplicateDetectionHistoryTimeWindow": "PT20S",
+    "RequiresDuplicateDetection": false
+  },
+  "Subscriptions": [
+    {
+      "Name": "dashboard",
+      "Properties": {
+        "DeadLetteringOnMessageExpiration": false,
+        "DefaultMessageTimeToLive": "PT1H",
+        "LockDuration": "PT1M",
+        "MaxDeliveryCount": 3,
+        "ForwardDeadLetteredMessagesTo": "",
+        "ForwardTo": "",
+        "RequiresSession": false
+      }
+    }
+  ]
+}
+```
+
+Restart `servicebus-emulator`. Publish with `--topic orders-events` and read with `--entity-type topic --subscription dashboard`.
+
+### Create A New Event Hub
+
+Add an entity under `Entities` in `emulators/eventhubs/config.json`:
+
+```json
+{
+  "Name": "eh-orders",
+  "PartitionCount": 2,
+  "ConsumerGroups": [
+    {
+      "Name": "cg-default"
+    }
+  ]
+}
+```
+
+Restart `eventhubs-emulator`. Use the Event Hubs connection string above with your SDK or Kafka client against host port `9092` when needed.

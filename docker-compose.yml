@@ -1,0 +1,73 @@
+name: azure-messaging-emulators
+
+services:
+  servicebus-emulator:
+    container_name: servicebus-emulator
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    pull_policy: always
+    depends_on:
+      - sql-edge
+    ports:
+      - "${SERVICEBUS_AMQP_HOST_PORT:-5672}:5672"
+      - "${SERVICEBUS_HTTP_HOST_PORT:-5300}:${EMULATOR_HTTP_PORT:-5300}"
+    environment:
+      SQL_SERVER: sql-edge
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Str0ng_Passw0rd!2026}"
+      ACCEPT_EULA: "${ACCEPT_EULA:-Y}"
+      EMULATOR_HTTP_PORT: "${EMULATOR_HTTP_PORT:-5300}"
+      SQL_WAIT_INTERVAL: "${SQL_WAIT_INTERVAL:-15}"
+    volumes:
+      - ./emulators/servicebus/config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+    networks:
+      emulators:
+        aliases:
+          - sb-emulator
+
+  eventhubs-emulator:
+    container_name: eventhubs-emulator
+    image: mcr.microsoft.com/azure-messaging/eventhubs-emulator:latest
+    pull_policy: always
+    depends_on:
+      - azurite
+    ports:
+      - "${EVENTHUBS_AMQP_HOST_PORT:-5673}:5672"
+      - "${EVENTHUBS_KAFKA_HOST_PORT:-9092}:9092"
+      - "${EVENTHUBS_HTTP_HOST_PORT:-5301}:5300"
+    environment:
+      BLOB_SERVER: azurite
+      METADATA_SERVER: azurite
+      ACCEPT_EULA: "${ACCEPT_EULA:-Y}"
+    volumes:
+      - ./emulators/eventhubs/config.json:/Eventhubs_Emulator/ConfigFiles/Config.json:ro
+    networks:
+      emulators:
+        aliases:
+          - eventhubs-emulator
+
+  sql-edge:
+    container_name: sql-edge
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "${ACCEPT_EULA:-Y}"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Str0ng_Passw0rd!2026}"
+    networks:
+      emulators:
+        aliases:
+          - sql-edge
+
+  azurite:
+    container_name: azurite
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    pull_policy: always
+    ports:
+      - "${AZURITE_BLOB_HOST_PORT:-10000}:10000"
+      - "${AZURITE_QUEUE_HOST_PORT:-10001}:10001"
+      - "${AZURITE_TABLE_HOST_PORT:-10002}:10002"
+    networks:
+      emulators:
+        aliases:
+          - azurite
+
+networks:
+  emulators:
+    driver: bridge
